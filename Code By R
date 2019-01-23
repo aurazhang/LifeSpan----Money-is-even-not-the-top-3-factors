@@ -1,0 +1,209 @@
+
+#packages for the project 
+install.packages('XML')
+library(XML)
+install.packages("tidyverse")
+library("pdftools")
+library("glue")
+library("tidyverse")
+install.packages("ggthemes")
+library("ggthemes")
+library(stringr)
+install.packages('sqldf')
+library(sqldf)
+
+
+#data sources 
+myurl="https://www.cia.gov/library/publications/the-world-factbook/rankorder/2102rank.html"
+mysource=readLines(myurl,encoding = "UTF-8")
+mytable=readHTMLTable(mysource, header = TRUE)
+
+GDPurl= "https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(PPP)_per_capita"
+GDPsource=readLines(GDPurl,encoding = "UTF-8")
+GDPtable=readHTMLTable(GDPsource, header = T)
+
+url<-'https://www.thelancet.com/action/showPdf?pii=S0140-6736%2817%2930818-8'
+page<- seq(1:36)
+#both walk() and the map() family have sister functions designed to do just thta:
+#apply a functino to two datasets at a time, one by one. 
+#when we use walk2(), we want its side-effect to render output or save files. 
+walk2(url, 'info',download.file, mode = 'wb')
+raw_data<-map('info',pdf_text)
+
+airdataset<-read.csv('C:/Users/Shiqi/Downloads/Air_Quality_2017.csv',  sep=',', col.names = c('Countries', 'Air_Quality'))
+
+GIIurl= "http://hdr.undp.org/en/composite/GII"
+GIIsource=readLines(GIIurl,encoding = "UTF-8")
+GIItable=readHTMLTable(GIIsource, header = T)
+
+
+#transfer into tables in r
+#slice country and life exp 2017 data and check their type
+#create data frame
+country1= mytable$rankOrder$Country
+lifeExp2017=mytable$rankOrder$`(YEARS)`
+country1=as.character(country1)
+
+#grab data for GDP per capita 2017 from website
+WorldBank<-GDPtable[[4]]
+country2<-WorldBank$`Country/Territory`
+GDPper<- gsub(",", "", WorldBank$`Int$`)
+GDPper<- as.numeric(GDPper)
+country2<- as.character(country2)
+typeof(GDPper)
+View(GDPper)
+
+
+#data for Health Access and Quality Index
+data= matrix()
+#the result of following is raw pdf text document 
+#raw_data[[1]][8]
+
+for (i in 0:2){
+  page<-raw_data[[1]][8+i]
+  word_split<-str_split(page, pattern = "\r\n")
+  country_split<-word_split[[1]][7:(length(word_split[[1]])-3)]
+  chr<-country_split[is.na(as.numeric(country_split))]
+  del<-grep('[0-9]$', chr, perl = T)
+  data1<-as.matrix(chr[del])
+  data= rbind(data, data1)
+}
+
+page<-raw_data[[1]][11]
+word_split<-str_split(page, pattern = "\r\n")
+del<-grep('[0-9]$', word_split[[1]], perl = T)
+a<-word_split[[1]][del][1:(length(del)-2)]
+clean<- c(a[1], a[2], a[3], a[5], a[7])
+b<-substr(clean,1,nchar(clean)-3)
+c<-replace(a, c(1,2,3,5,7) ,b)
+d<-as.matrix(setdiff(c, c[5]))
+rawdata= rbind(data, d)
+country3 <- str_trim(str_extract(rawdata, '[aA-zZ\\s]+'))
+HAQ <- as.numeric(str_extract(rawdata, "[0-9]+"))
+
+
+#data from air
+Airdata<-aggregate(.~Countries, data = airdataset, median)
+country4<-as.character(Airdata[,1])
+View(Airdata)
+
+#Gender Inequality Index
+GIIdata<-GIItable[[1]][c(2,3)][1:193,]
+GIIdata<-GIIdata[!(GIIdata[,2]=="" | GIIdata[,2]==".."),]
+country5<-as.character(GIIdata[,1])
+
+GIIdatatest<-(as.character(GIIdata[,2]))
+
+
+#since there is a very limited number of data here, 
+#we try to reserve as many countries as we can 
+#five tables have 224, 186, 196, 213, 160 obs respectively.
+T1notinT2<-country1[!(country1 %in% country2)]
+T2notinT1<-country2[!(country2 %in% country1)]
+Combine1_2<- sort(append(T1notinT2,T2notinT1))
+Combine1_2
+
+T3notinT4<-country3[!(country3 %in% country4)]
+T4notinT3<-country4[!(country4 %in% country3)]
+Combine3_4<- sort(append(T3notinT4,T4notinT3))
+Combine3_4
+
+T1notinT5<-country1[!(country1 %in% country5)]
+T5notinT1<-country5[!(country5 %in% country1)]
+Combine1_5 <- sort(append(T1notinT5, T5notinT1))
+Combine1_5
+
+Combine<- sort(append(append(Combine1_2, Combine3_4), Combine1_5))
+Combine
+
+#from wiki, "Cape Verde" = "Cabo Verde", "Congo, Dem. Rep." = "Congo, Democratic Republic of the"  
+#"Congo, Rep." = "Congo, Republic of the", "Cote d'Ivoire" ="Côte d'Ivoire" ="CÃ´te d'Ivoire"  
+#"Czechia"  = "Czech Republic", "Micronesia" = "Micronesia, Federated States of"="Federated States of Micronesia" 
+#"Korea, North" ="North Korea"="Democratic People's Republic of Korea", "Korea"  ="Korea, South" ="South Korea"
+# "Sao Tome and Principe"  = "São Tomé and Príncipe", "West Bank"= "West Bank and Gaza"
+#"China" = "China (People's Republic of)"  , "Laos" = "Lao People's Democratic Republic"
+#"Syrian Arab Republic"   = "Syria" , "Bahamas" = "The Bahamas", "The Gambia" = "Gambia", "Timor-Leste" ="Timor" 
+#"United Kingdom"  = 'UK',  "United States" = "USA", "Vietnam"= "Viet Nam", "Virgin Islands" ="United States Virgin Islands" 
+#"South Sudan" = "South Sudan "
+
+diff1<- c("Cape Verde", "Congo, Dem. Rep.","DR Congo","Congo, Rep.", "Côte d'Ivoire", "Czech Republic","Micronesia, Federated States of","Korea, North","Korea, South","Korea (Republic of)",'UK',"USA",
+          "São Tomé and Príncipe","West Bank and Gaza", "China (People's Republic of)","Lao People's Democratic Republic","Syrian Arab Republic" ,"The Bahamas","The Gambia",
+          "Timor-Leste" ,"Viet Nam","United States Virgin Islands","South Sudan ","Bolivia (Plurinational State of)", "Brunei Darussalam","Guinea-Bissau" ,"Iran (Islamic Republic of)","Moldova (Republic of)",
+          "Russian Federation","Slovak Republic","Tanzania (United Republic of)" , "Venezuela (Bolivarian Republic of)")
+
+diff2<- c("Cape Verde", "Congo, Democratic Republic of the","Congo (Democratic Republic of the)","Congo, Republic of the", "CÃ´te d'Ivoire" ,"Czech Republic","Federated States of Micronesia",
+          "Democratic People's Republic of Korea","Korea","Korea (Republic of)",'UK',"USA",
+          "São Tomé and Príncipe","West Bank and Gaza", "China (People's Republic of)","Lao People's Democratic Republic","Syrian Arab Republic" ,"Bahamas, The","Gambia, The",
+          "Timor-Leste" ,"Viet Nam","United States Virgin Islands","South Sudan ","Bolivia (Plurinational State of)" ,"Brunei Darussalam" ,"Guinea-Bissau","Iran (Islamic Republic of)","Moldova (Republic of)",
+          "Russian Federation","Slovak Republic","Tanzania (United Republic of)" , "Venezuela (Bolivarian Republic of)")
+
+standardize<- c("Cabo Verde", "Democratic Republic of the Congo", "Democratic Republic of the Congo"  ,"Congo", "Cote d'Ivoire" ,"Czechia", "Micronesia" , "North Korea", "South Korea", "South Korea", 
+                "United Kingdom","United States","Sao Tome and Principe" , "West Bank","China"   , "Laos",  "Syria" , "Bahamas" ,  "Gambia", "Timor" ,  
+                "Vietnam", "Virgin Islands", "South Sudan","Bolivia","Brunei","Guinea","Iran" ,"Moldova","Russia" ,"Slovakia","Tanzania","Venezuela" )
+
+country5[country5 %in% diff2] <- standardize[match(country5, diff2, nomatch = 0)]
+country5[country5 %in% diff1] <- standardize[match(country5, diff1, nomatch = 0)]
+country4[country4 %in% diff2] <- standardize[match(country4, diff2, nomatch = 0)]
+country4[country4 %in% diff1] <- standardize[match(country4, diff1, nomatch = 0)]
+country3[country3 %in% diff2] <- standardize[match(country3, diff2, nomatch = 0)]
+country3[country3 %in% diff1] <- standardize[match(country3, diff1, nomatch = 0)]
+country2[country2 %in% diff2] <- standardize[match(country2, diff2, nomatch = 0)]
+country2[country2 %in% diff1] <- standardize[match(country2, diff1, nomatch = 0)]
+country1[country1 %in% diff2] <- standardize[match(country1, diff2, nomatch = 0)]
+country1[country1 %in% diff1] <- standardize[match(country1, diff1, nomatch = 0)]
+
+#create and combine tables
+table1<- data.frame(Country1=country1, LifeExp2017=as.numeric(as.character(lifeExp2017)))
+table2<- data.frame(Country2=country2, GDPper=GDPper)
+table3<- data.frame(Country3=country3, HAQ=HAQ)
+table4<- data.frame(Country4=country4, AirQuality =as.numeric(Airdata[,2]))
+table5<- data.frame(Country5=country5, GII=as.numeric(GIIdatatest))
+
+dataset1<-merge(table1, table2, by.x = 'Country1', by.y='Country2')
+dataset2<-merge(table3, table4, by.x = 'Country3', by.y='Country4')
+dataset3<-merge(dataset1, table5, by.x = 'Country1', by.y='Country5')
+datasetTotal<-merge(dataset2, dataset3, by.x = 'Country3', by.y='Country1')
+head(datasetTotal)
+
+
+#because table 5 only has 160 observations, so when the datasetTotal has 149 records, it is acceptable. 
+#The left 11 records should be missed at least in one table so that they don't show up
+
+#after we got all the data we need, it is time to build model!
+#Randomly shuffle the data
+library(glmnet)
+yourData<-datasetTotal[sample(nrow(datasetTotal)),]
+
+
+#Create 10 equally size folds
+folds <- cut(seq(1,nrow(yourData)),breaks=10,labels=FALSE)
+head(datasetTotal)
+
+#Perform 10 fold cross validation
+accuracylm<-c()
+accuracylinear<-c()
+accuracypoly<-c()
+
+for(i in 1:10){
+  #Segment your data by fold using the which() function 
+  testIndexes <- which(folds==i,arr.ind=TRUE)
+  testData <- yourData[testIndexes, ]
+  trainData <- yourData[-testIndexes, ]
+  xtrain<-matrix(c(trainData[[2]],trainData[[3]],trainData[[5]],trainData[[6]]), ncol =4)
+  ytrain<-matrix(trainData[[4]])
+  xtest<-matrix(c(testData[[2]],testData[[3]],testData[[5]],testData[[6]]), ncol =4)
+  ytest<-matrix(testData[[4]])
+  fit<- cv.glmnet(xtrain, ytrain)
+  polyMod<- lm(LifeExp2017~ HAQ+I(1/-GII)+AirQuality+I(GDPper^(1/2)), data =trainData)
+  linearMod<- lm(LifeExp2017~ HAQ+AirQuality+GDPper+GII, data =trainData)
+  bestlam <- fit$lambda.min
+  predlm <- predict(fit, s = bestlam, newx = xtest)
+  predlinear<- predict(linearMod, testData)  
+  predpoly<- predict(polyMod, testData)  
+  accuracypoly[i]<-cor(predpoly, testData$LifeExp2017)
+  accuracylinear[i]<-cor(predlinear, testData$LifeExp2017)
+  accuracylm[i]<-cor(predlm, ytest)
+}
+mean(accuracylm)
+mean(accuracylinear)
+mean(accuracypoly)
